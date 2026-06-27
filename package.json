@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-panda-free-llm",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An n8n node that sends a prompt to multiple FREE LLM providers (Groq, Cerebras, Google Gemini, OpenRouter, Mistral) with automatic failover when one hits its rate limit or daily quota.",
   "keywords": [
     "n8n-community-node-package",
@@ -42,13 +42,16 @@
       "dist/credentials/PandaFreeLlmApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/PandaFreeLlm/PandaFreeLlm.node.js"
+      "dist/nodes/PandaFreeLlm/PandaFreeLlm.node.js",
+      "dist/nodes/PandaLlm/PandaLlm.node.js"
     ]
   },
   "peerDependencies": {
-    "n8n-workflow": "*"
+    "n8n-workflow": "*",
+    "@langchain/core": "*"
   },
   "devDependencies": {
+    "@langchain/core": "^1.0.0",
     "@types/node": "^20.11.0",
     "gulp": "^5.0.0",
     "n8n-workflow": "*",
