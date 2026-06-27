@@ -74,6 +74,7 @@ interface PandaChatFields extends BaseChatModelParams {
 	temperature: number;
 	maxTokens: number;
 	timeout: number;
+	responseFormat: string;
 }
 
 // ── A LangChain chat model that fails over across free providers ──────────────
@@ -85,6 +86,7 @@ class PandaFailoverChat extends BaseChatModel<BaseLanguageModelCallOptions> {
 	private temperature: number;
 	private maxTokens: number;
 	private timeoutMs: number;
+	private responseFormat: string;
 	private boundTools?: IDataObject[];
 
 	constructor(fields: PandaChatFields) {
@@ -93,6 +95,7 @@ class PandaFailoverChat extends BaseChatModel<BaseLanguageModelCallOptions> {
 		this.temperature = fields.temperature;
 		this.maxTokens = fields.maxTokens;
 		this.timeoutMs = fields.timeout;
+		this.responseFormat = fields.responseFormat;
 	}
 
 	_llmType(): string {
@@ -109,6 +112,7 @@ class PandaFailoverChat extends BaseChatModel<BaseLanguageModelCallOptions> {
 			temperature: this.temperature,
 			maxTokens: this.maxTokens,
 			timeout: this.timeoutMs,
+			responseFormat: this.responseFormat,
 		});
 		clone.boundTools = openAiTools;
 		return clone.withConfig(kwargs ?? {}) as unknown as Runnable<
@@ -152,6 +156,21 @@ class PandaFailoverChat extends BaseChatModel<BaseLanguageModelCallOptions> {
 		runManager?: CallbackManagerForLLMRun,
 	): Promise<ChatResult> {
 		const oaMessages = this.toOpenAiMessages(messages);
+		const wantJson = this.responseFormat === 'json';
+
+		// OpenAI-compatible JSON mode expects "json" to appear in the prompt.
+		if (wantJson) {
+			const mentionsJson = oaMessages.some((m) =>
+				typeof m.content === 'string' ? /json/i.test(m.content) : false,
+			);
+			if (!mentionsJson) {
+				oaMessages.unshift({
+					role: 'system',
+					content: 'Respond with a single valid JSON object only. No markdown, no code fences.',
+				});
+			}
+		}
+
 		let lastError: Error | undefined;
 
 		for (const step of this.chain) {
@@ -163,6 +182,9 @@ class PandaFailoverChat extends BaseChatModel<BaseLanguageModelCallOptions> {
 			};
 			if (this.boundTools && this.boundTools.length > 0) {
 				body.tools = this.boundTools;
+			}
+			if (wantJson) {
+				body.response_format = { type: 'json_object' };
 			}
 
 			const controller = new AbortController();
@@ -305,6 +327,17 @@ export class PandaLlm implements INodeType {
 				options: [
 					{ displayName: 'Max Tokens', name: 'maxTokens', type: 'number', default: 1024 },
 					{
+						displayName: 'Response Format',
+						name: 'responseFormat',
+						type: 'options',
+						options: [
+							{ name: 'Text', value: 'text' },
+							{ name: 'JSON', value: 'json' },
+						],
+						default: 'text',
+						description: 'Ask the model to return a JSON object instead of free text',
+					},
+					{
 						displayName: 'Temperature',
 						name: 'temperature',
 						type: 'number',
@@ -418,6 +451,7 @@ export class PandaLlm implements INodeType {
 		const temperature = (options.temperature as number) ?? 0.7;
 		const maxTokens = (options.maxTokens as number) ?? 1024;
 		const timeout = (options.timeout as number) ?? 30000;
+		const responseFormat = (options.responseFormat as string) ?? 'text';
 
 		const keyFor = (svc: string) => ((credentials[PROVIDER_CRED_FIELD[svc]] as string) || '').trim();
 
@@ -447,7 +481,7 @@ export class PandaLlm implements INodeType {
 			chain.push({ name: PROVIDER_LABELS[svc], baseUrl: PROVIDER_BASE_URLS[svc], apiKey: keyFor(svc), model: mdl });
 		}
 
-		const model = new PandaFailoverChat({ chain, temperature, maxTokens, timeout });
+		const model = new PandaFailoverChat({ chain, temperature, maxTokens, timeout, responseFormat });
 		return { response: model };
 	}
 }
