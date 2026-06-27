@@ -13,14 +13,14 @@
     "failover"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/YOUR_GITHUB/n8n-nodes-panda-free-llm",
+  "homepage": "https://github.com/GreatPandetta/n8n-nodes-panda-free-llm",
   "author": {
     "name": "Mostafa",
-    "email": "you@example.com"
+    "email": "mostafa.elhangery@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_GITHUB/n8n-nodes-panda-free-llm.git"
+    "url": "git+https://github.com/GreatPandetta/n8n-nodes-panda-free-llm.git"
   },
   "engines": {
     "node": ">=20.15"
