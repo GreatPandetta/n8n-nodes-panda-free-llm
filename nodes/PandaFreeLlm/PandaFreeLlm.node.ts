@@ -48,8 +48,11 @@ const PROVIDER_OPTIONS = Object.keys(PROVIDER_BASE_URLS).map((service) => ({
 	value: service,
 }));
 
+// Fallback rows encode "<provider>::<modelId>" in a single value.
+const VALUE_SEP = '::';
+
 interface FallbackRow {
-	provider: string;
+	model: string;
 }
 
 export class PandaFreeLlm implements INodeType {
@@ -133,36 +136,37 @@ export class PandaFreeLlm implements INodeType {
 				type: 'boolean',
 				default: true,
 				description:
-					'Whether to try other free providers (using their default model) if the primary one fails',
+					'Whether to try other free providers if the primary one fails',
 			},
 			{
-				displayName: 'Fallback Providers (in order)',
+				displayName: 'Fallback Models (in order)',
 				name: 'fallbackProviders',
 				type: 'fixedCollection',
 				typeOptions: { multipleValues: true, sortable: true },
 				displayOptions: { show: { failover: [true] } },
 				description:
-					'Tried top to bottom after the primary, each with its default model. The primary provider is skipped automatically if listed here.',
+					'Tried top to bottom after the primary. Each row is one Provider + Model from the live list. Drag to reorder.',
 				default: {
 					provider: [
-						{ provider: 'groq' },
-						{ provider: 'cerebras' },
-						{ provider: 'gemini' },
-						{ provider: 'openrouter' },
-						{ provider: 'mistral' },
+						{ model: `cerebras${VALUE_SEP}${DEFAULT_MODELS.cerebras}` },
+						{ model: `gemini${VALUE_SEP}${DEFAULT_MODELS.gemini}` },
+						{ model: `openrouter${VALUE_SEP}${DEFAULT_MODELS.openrouter}` },
+						{ model: `mistral${VALUE_SEP}${DEFAULT_MODELS.mistral}` },
 					],
 				},
 				options: [
 					{
 						name: 'provider',
-						displayName: 'Provider',
+						displayName: 'Fallback',
 						values: [
 							{
-								displayName: 'Provider',
-								name: 'provider',
+								displayName: 'Provider & Model',
+								name: 'model',
 								type: 'options',
-								options: PROVIDER_OPTIONS,
-								default: 'groq',
+								typeOptions: { loadOptionsMethod: 'getAllModels' },
+								default: '',
+								description:
+									'Live list across every provider you have a key for (OpenRouter shows :free models).',
 							},
 						],
 					},
@@ -205,7 +209,7 @@ export class PandaFreeLlm implements INodeType {
 
 	methods = {
 		loadOptions: {
-			// Live model list for the currently selected (top-level) provider.
+			// Models for the currently selected (top-level) primary provider.
 			async getModelsForProvider(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const service = (this.getCurrentNodeParameter('provider') as string) || 'groq';
 				const baseUrl = PROVIDER_BASE_URLS[service];
@@ -251,6 +255,71 @@ export class PandaFreeLlm implements INodeType {
 					return fallback;
 				}
 			},
+
+			// Combined "Provider — Model" list across all providers (for fallback rows).
+			async getAllModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				let credentials: IDataObject = {};
+				try {
+					credentials = (await this.getCredentials('pandaFreeLlmApi')) as IDataObject;
+				} catch {
+					credentials = {};
+				}
+
+				const results: INodePropertyOptions[] = [];
+
+				for (const service of Object.keys(PROVIDER_BASE_URLS)) {
+					const baseUrl = PROVIDER_BASE_URLS[service];
+					const apiKey = ((credentials[PROVIDER_CRED_FIELD[service]] as string) || '').trim();
+					if (!apiKey) continue;
+
+					try {
+						const response = (await this.helpers.httpRequest({
+							method: 'GET' as IHttpRequestMethods,
+							url: `${baseUrl}/models`,
+							headers: { Authorization: `Bearer ${apiKey}` },
+							json: true,
+						})) as IDataObject;
+
+						const data = (response.data as IDataObject[]) || [];
+						const ids = data
+							.map((m) => m.id as string)
+							.filter((id) => !!id)
+							.filter((id) => (service === 'openrouter' ? id.endsWith(':free') : true))
+							.sort((a, b) => a.localeCompare(b));
+
+						if (ids.length === 0) {
+							results.push({
+								name: `${PROVIDER_LABELS[service]} — ${DEFAULT_MODELS[service]} (default)`,
+								value: `${service}${VALUE_SEP}${DEFAULT_MODELS[service]}`,
+							});
+							continue;
+						}
+
+						for (const id of ids) {
+							results.push({
+								name: `${PROVIDER_LABELS[service]} — ${id}`,
+								value: `${service}${VALUE_SEP}${id}`,
+							});
+						}
+					} catch {
+						results.push({
+							name: `${PROVIDER_LABELS[service]} — ${DEFAULT_MODELS[service]} (default, list unavailable)`,
+							value: `${service}${VALUE_SEP}${DEFAULT_MODELS[service]}`,
+						});
+					}
+				}
+
+				if (results.length === 0) {
+					for (const service of Object.keys(PROVIDER_BASE_URLS)) {
+						results.push({
+							name: `${PROVIDER_LABELS[service]} — ${DEFAULT_MODELS[service]} (default — add a key to see live models)`,
+							value: `${service}${VALUE_SEP}${DEFAULT_MODELS[service]}`,
+						});
+					}
+				}
+
+				return results;
+			},
 		},
 	};
 
@@ -283,18 +352,30 @@ export class PandaFreeLlm implements INodeType {
 					throw new NodeOperationError(this.getNode(), 'User Prompt is empty', { itemIndex: i });
 				}
 
-				// Build the ordered try-chain: primary first, then unique fallbacks.
+				// Build the ordered try-chain: primary first, then fallbacks.
+				// Dedupe on provider+model so the same call isn't retried, but the same
+				// provider with a different model IS allowed.
 				const chain: Array<{ service: string; model: string }> = [];
-				const seen = new Set<string>();
-				chain.push({ service: provider, model: selectedModel || DEFAULT_MODELS[provider] });
-				seen.add(provider);
+				const tried = new Set<string>();
+
+				const primaryModel = selectedModel || DEFAULT_MODELS[provider];
+				chain.push({ service: provider, model: primaryModel });
+				tried.add(`${provider}${VALUE_SEP}${primaryModel}`);
+
 				for (const row of fallbackRows) {
-					if (!row.provider || seen.has(row.provider)) continue;
-					seen.add(row.provider);
-					chain.push({ service: row.provider, model: DEFAULT_MODELS[row.provider] });
+					const raw = (row.model || '').trim();
+					if (!raw) continue;
+					const sep = raw.indexOf(VALUE_SEP);
+					const service = sep === -1 ? raw : raw.slice(0, sep);
+					const fbModel =
+						(sep === -1 ? '' : raw.slice(sep + VALUE_SEP.length)) || DEFAULT_MODELS[service];
+					const key = `${service}${VALUE_SEP}${fbModel}`;
+					if (!PROVIDER_BASE_URLS[service] || tried.has(key)) continue;
+					tried.add(key);
+					chain.push({ service, model: fbModel });
 				}
 
-				// In JSON mode, providers like OpenAI-compatible APIs expect "json" in the prompt.
+				// JSON mode: OpenAI-compatible APIs expect "json" to appear in the prompt.
 				let effectiveSystem = systemPrompt;
 				if (wantJson && !/json/i.test(effectiveSystem)) {
 					effectiveSystem =

@@ -45,7 +45,7 @@ Create one **Panda Free LLM API** credential and paste in only the keys you have
 - **Response Format** — `Text` (plain text) or `JSON`. In JSON mode the node sends `response_format: { type: "json_object" }`, nudges the prompt to return JSON, and also returns the parsed object in `outputParsed` (handy for feeding straight into a database).
 - **Provider** — the provider to try first.
 - **Model** — a live dropdown of models **for the selected provider** (reopen it after changing the provider to refresh). OpenRouter is filtered to `:free` models. Leave blank to use the provider's default.
-- **Enable Failover** + **Fallback Providers (in order)** — if the primary provider fails (rate limit, quota, busy, timeout, empty), the node tries each fallback in order using that provider's default model. The primary is skipped automatically if it also appears in the fallback list.
+- **Enable Failover** + **Fallback Models (in order)** — if the primary fails (rate limit, quota, busy, timeout, empty), the node tries each fallback in order. Each fallback row is a single **Provider — Model** dropdown from the live list, so you can pick a specific model per fallback (including the same provider with a different model). Exact duplicates of the primary are skipped automatically.
 - **Options** — Max Tokens, Temperature, Timeout (ms), and "Throw If All Providers Fail" (turn off to output `success:false` instead of erroring).
 
 Output fields: `output` (text), `provider`, `model`, `usage`, `attempts`, and — in JSON mode — `outputParsed`.
