@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-panda-free-llm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "An n8n node that sends a prompt to multiple FREE LLM providers (Groq, Cerebras, Google Gemini, OpenRouter, Mistral) with automatic failover when one hits its rate limit or daily quota.",
   "keywords": [
     "n8n-community-node-package",

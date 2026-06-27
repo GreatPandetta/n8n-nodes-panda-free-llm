@@ -42,10 +42,15 @@ Create one **Panda Free LLM API** credential and paste in only the keys you have
 
 - **System Prompt** — your fixed instructions (set once).
 - **User Prompt** — defaults to `={{ $json.text }}`. Map it to whatever field carries your input, e.g. `={{ $json.message }}`.
-- **Models (in failover priority order)** — each row is a single **live dropdown** listing *Provider — Model*, pulled from each provider's `/models` endpoint for every key you've configured. Reorder rows by dragging; the first that answers wins. Open/refresh the dropdown to pick up newly added free models (and drop ones a provider removed). OpenRouter is filtered to `:free` models only. If a provider's list can't be fetched, its default model is still offered.
+- **Response Format** — `Text` (plain text) or `JSON`. In JSON mode the node sends `response_format: { type: "json_object" }`, nudges the prompt to return JSON, and also returns the parsed object in `outputParsed` (handy for feeding straight into a database).
+- **Provider** — the provider to try first.
+- **Model** — a live dropdown of models **for the selected provider** (reopen it after changing the provider to refresh). OpenRouter is filtered to `:free` models. Leave blank to use the provider's default.
+- **Enable Failover** + **Fallback Providers (in order)** — if the primary provider fails (rate limit, quota, busy, timeout, empty), the node tries each fallback in order using that provider's default model. The primary is skipped automatically if it also appears in the fallback list.
 - **Options** — Max Tokens, Temperature, Timeout (ms), and "Throw If All Providers Fail" (turn off to output `success:false` instead of erroring).
 
-> The dropdown reflects whatever your key can actually access, so it stays current automatically. The hardcoded defaults are only used as a fallback when `/models` is unreachable.
+Output fields: `output` (text), `provider`, `model`, `usage`, `attempts`, and — in JSON mode — `outputParsed`.
+
+> JSON mode relies on each provider's OpenAI-compatible JSON support, which varies by model. If a model doesn't honor it, the prompt instruction still pushes it toward JSON, and a provider that rejects `response_format` simply fails over to the next.
 
 ## Publishing (for the author)
 
